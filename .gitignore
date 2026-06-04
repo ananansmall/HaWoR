@@ -8,6 +8,13 @@
 /hot3d/data_downloader/*.json
 /hot3d/mano_v1_2
 
+# Large output/example data
+/output/
+/example/7/
+/example/beizi/
+/example/*.mp4
+/thirdparty/
+
 
 .vscode/
 **/.DS_Store
