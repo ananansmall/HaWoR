@@ -15,6 +15,7 @@ from lib.vis.run_vis2 import run_vis2_on_video, run_vis2_on_video_cam
 
 
 if __name__ == '__main__':
+    """HaWoR 原始 Pipeline: 检测追踪 → 运动估计 → SLAM → Infiller → MANO前向 → aitviewer可视化"""
     parser = argparse.ArgumentParser()
     parser.add_argument("--img_focal", type=float)
     parser.add_argument("--video_path", type=str, default='example/video_0.mp4')
