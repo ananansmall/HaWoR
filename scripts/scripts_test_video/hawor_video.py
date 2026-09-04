@@ -65,9 +65,11 @@ def hawor_motion_estimation(args, start_idx, end_idx, seq_folder):
     
     tid = np.array([tr for tr in tracks])
 
-    if os.path.exists(f'{seq_folder}/tracks_{start_idx}_{end_idx}/frame_chunks_all.npy'):
-        print("skip hawor motion estimation")
-        frame_chunks_all = joblib.load(f'{seq_folder}/tracks_{start_idx}_{end_idx}/frame_chunks_all.npy')
+    tracks_dir = f'{seq_folder}/tracks_{start_idx}_{end_idx}'
+    required = ['frame_chunks_all.npy', 'model_masks.npy', 'model_verts.npy', 'model_joints.npy']
+    if all(os.path.exists(os.path.join(tracks_dir, f)) for f in required):
+        print("skip hawor motion estimation (all outputs present)")
+        frame_chunks_all = joblib.load(os.path.join(tracks_dir, 'frame_chunks_all.npy'))
         return frame_chunks_all, img_focal
 
     print(f'Running hawor on {video} ...')
@@ -96,6 +98,8 @@ def hawor_motion_estimation(args, start_idx, end_idx, seq_folder):
     img_center = [img.shape[1] / 2, img.shape[0] / 2]# w/2, h/2  
     H, W = img.shape[:2]
     model_masks = np.zeros((len(imgfiles), H, W))
+    model_verts = np.zeros((2, len(imgfiles), 778, 3))   # (hand, T, V, 3) camera space
+    model_joints = np.zeros((2, len(imgfiles), 21, 3))   # (hand, T, 21, 3) camera space
 
     bin_size = 128
     max_faces_per_bin = 20000
@@ -199,7 +203,9 @@ def hawor_motion_estimation(args, start_idx, end_idx, seq_folder):
             else: # right
                 outputs = run_mano(data_out["init_trans"], data_out["init_root_orient"], data_out["init_hand_pose"], betas=data_out["init_betas"])
             
-            vertices = outputs["vertices"][0].cpu()  # (T, N, 3)
+            vertices = outputs["vertices"][0].cpu()  # (T, N, 3)  camera space
+            joints = outputs["joints"][0].cpu().numpy()  # (T, 21, 3) camera space
+            hand_id = 0 if do_flip else 1  # 0=left, 1=right
             for img_i, _ in enumerate(img_ck):
                 if do_flip:
                     faces = torch.from_numpy(faces_left).cuda()
@@ -211,12 +217,22 @@ def hawor_motion_estimation(args, start_idx, end_idx, seq_folder):
                 verts_color = torch.tensor([0, 0, 255, 255]) / 255
                 vertices_i = vertices[[img_i]]
                 rend, mask = renderer.render_multiple(vertices_i.unsqueeze(0).cuda(), faces, verts_color.unsqueeze(0).cuda(), cameras, lights)
-                
+
                 model_masks[frame_ck[img_i]] += mask
-                
+                model_verts[hand_id, frame_ck[img_i]] = vertices[img_i].numpy()
+                model_joints[hand_id, frame_ck[img_i]] = joints[img_i]
+
     model_masks = model_masks > 0 # bool
     np.save(f'{seq_folder}/tracks_{start_idx}_{end_idx}/model_masks.npy', model_masks)
+    np.save(f'{seq_folder}/tracks_{start_idx}_{end_idx}/model_verts.npy', model_verts)
+    np.save(f'{seq_folder}/tracks_{start_idx}_{end_idx}/model_joints.npy', model_joints)
     joblib.dump(frame_chunks_all, f'{seq_folder}/tracks_{start_idx}_{end_idx}/frame_chunks_all.npy')
+    # Record the exact focal used to render the mask AND to generate the
+    # camera-space MANO (run_mano(init_trans)). combined_render must project the
+    # MANO with this same focal to stay aligned with the mask. This file is NOT
+    # overwritten by the later focal-search used for world-space alignment.
+    with open(f'{seq_folder}/tracks_{start_idx}_{end_idx}/mask_focal.txt', 'w') as f:
+        f.write(str(img_focal))
     return frame_chunks_all, img_focal
 
 def hawor_infiller(args, start_idx, end_idx, frame_chunks_all):

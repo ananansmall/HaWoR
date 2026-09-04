@@ -66,37 +66,23 @@ def hawor_slam(args, start_idx, end_idx):
     masks = torch.from_numpy(masks)
     print(masks.shape)
 
-    # Camera calibration (intrinsics) for SLAM
-    focal = args.img_focal
-    need_search = False
-    if focal is None:
+    # Camera calibration (intrinsics) for SLAM.
+    # The focal length is force-searched once per video in demov2.py and written
+    # to est_focal.txt; here we just read it. If the user passed --img_focal we
+    # use that instead. Falls back to 600 only if neither is available.
+    if args.img_focal is not None:
+        focal = float(args.img_focal)
+        print(f'Using user-provided --img_focal: {focal}')
+    else:
         try:
-            with open(os.path.join(video_folder, 'est_focal.txt'), 'r') as file:
-                focal = float(file.read().strip())
-            est_focal = est_calib(imgfiles)[0]
-            if abs(focal - 600.0) < 1.0 and est_focal > 800:
-                print(f'est_focal.txt has default value 600, but image size suggests focal~{est_focal:.0f}')
-                print('Searching for optimal focal length...')
-                need_search = True
-        except:
-            need_search = True
-
-    if need_search:
-        print('Searching for optimal focal length via SLAM reprojection error...')
-        masks_search = np.load(f'{video_folder}/tracks_{start_idx}_{end_idx}/model_masks.npy', allow_pickle=True)
-        masks_search = torch.from_numpy(masks_search)
-        est_focal = est_calib(imgfiles)[0]
-        low = max(500, int(est_focal * 0.5))
-        high = min(3000, int(est_focal * 1.5))
-        step = max(50, (high - low) // 20)
-        focal = search_focal_length(imgfiles, masks_search,
-                                    stride=10, max_frame=50,
-                                    low=low, high=high, step=step)
-        print(f'Search result: focal={focal:.0f}')
-        with open(os.path.join(video_folder, 'est_focal.txt'), 'w') as file:
-            file.write(str(int(focal)))
+            with open(os.path.join(video_folder, 'est_focal.txt'), 'r') as f:
+                focal = float(f.read().strip())
+            print(f'Using force-searched focal from est_focal.txt: {focal:.0f}')
+        except Exception:
+            print('est_focal.txt not found, falling back to default 600')
+            focal = 600.0
     calib = np.array(est_calib(imgfiles)) # [focal, focal, cx, cy]
-    center = calib[2:]        
+    center = calib[2:]
     calib[:2] = focal
     
     # Droid-slam with masking
